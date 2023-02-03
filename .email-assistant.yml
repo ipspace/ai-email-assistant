@@ -1,0 +1,17 @@
+openai:
+  org: "your OpenAI Org ID"
+  key: "your OpenAI key"
+email:
+  host: "FQDN of your IMAP server"
+  smtp: "FQDN of your SMTP server"
+  user: "Your IMAP/SMTP username"
+  from: "Sender email address, for example Email Assistant <assistant@example.com>"
+  bcc:  "Email you want the copies of correspondence sent to, for example me@example.com"
+  password: "Your IMAP/SMTP password"
+  folder: "The IMAP folder with emails of interest, for example Scammers"
+#
+# This is the prompt sent to OpenAI API together with the email content. Be creative
+#
+prompt: >
+  Create a gruffy negative email reply to the following email in the 
+  style of Charles Dickens. Sign with 'Overworked AI bot'
