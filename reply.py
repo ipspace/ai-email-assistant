@@ -10,6 +10,32 @@ import email
 import yaml
 import typing
 import textwrap
+import argparse
+
+IMAP_session: typing.Any = None
+DEBUG_FLAG: bool = False
+
+def parse_CLI_args() -> argparse.Namespace:
+  global DEBUG_FLAG
+  parser = argparse.ArgumentParser(description='AI-driven email assistant')
+  parser.add_argument('--config', dest='config', action='store', default='~/.email-assistant.yml',
+                  help='configuration file')
+  parser.add_argument('--test', dest='test', action='store',help='Test content')
+  parser.add_argument('--debug', dest='debug', action='store_true',help=argparse.SUPPRESS)
+  args = parser.parse_args()
+  if args.debug:
+    DEBUG_FLAG = True
+
+  return args
+
+def fail_miserably(t: str) -> None:
+  print(f'{t}\n{str(sys.exc_info()[1])}')
+  sys.exit(1)
+
+def debug(t: str) -> None:
+  global DEBUG_FLAG
+  if DEBUG_FLAG:
+    print(t)
 
 def read_config(config_file: str) -> dict:
   try:
@@ -18,9 +44,8 @@ def read_config(config_file: str) -> dict:
       if not isinstance(config,dict):
         print(f'Cannot read YAML configuration from {config_file}')
         sys.exit(1)
-  except Exception as ex:
-    print(f'Cannot read configuration file {config_file}: {str(sys.exc_info()[1])}')
-    sys.exit(1)
+  except:
+    fail_miserably(f'Cannot read configuration file {config_file}')
 
   return config
 
@@ -38,7 +63,7 @@ def get_ai_response(config: dict, text: str) -> str:
     presence_penalty=0.5,
     frequency_penalty=0.5)
 
-  print(f'{type(reply)}\n{reply}')
+  debug(f'{type(reply)}\n{reply}')
   return(reply.choices[0].text)
 
 def open_IMAP(config: dict) -> imaplib.IMAP4:
@@ -50,10 +75,9 @@ def open_IMAP(config: dict) -> imaplib.IMAP4:
 def fetch_email(mail: imaplib.IMAP4) -> dict:
 
   resp_code, mail_ids = mail.search(None, "ALL")
-#  print(mail_ids)
 
   for mail_id in mail_ids[0].decode().split():
-    print(f"Fetching message {mail_id} from the input folder")
+    debug(f"Fetching message {mail_id} from the input folder")
     mail_data: typing.Any
     resp_code, mail_data = mail.fetch(mail_id, '(RFC822)')
     if not isinstance(mail_data,list):
@@ -70,13 +94,11 @@ def fetch_email(mail: imaplib.IMAP4) -> dict:
 
   return {}
 
-  print(f'From: {m_from}\nSubject: {m_subj}\n\n{m_text}')
-
 def delete_message(mail: imaplib.IMAP4, mail_id: str) -> None:
   resp_code, response = mail.store(mail_id, '+FLAGS', '\\Deleted')
-  print(f'Deleted message ID {mail_id}: {response}')
+  debug(f'Deleted message ID {mail_id}: {response}')
   resp_code, response = mail.expunge()
-  print(f'Expunged deleted messages: {response}')
+  debug(f'Expunged deleted messages: {response}')
 
 def sendmail(config: dict, m_to: str, m_subj: str, m_body: str) -> None:
   mail = smtplib.SMTP_SSL(config['email']['smtp'])
@@ -91,29 +113,75 @@ def sendmail(config: dict, m_to: str, m_subj: str, m_body: str) -> None:
   msg.set_content(m_body)
 
   response = mail.send_message(msg)
-  print(f'Sending message to {m_to}: {response}')
+  print(f'Sent message to {m_to}: {response}')
   mail.quit()
 
-def main() -> None:
-  config = read_config('~/.email-assistant.yml')
-  mail = open_IMAP(config)
-  msg = fetch_email(mail)
+def get_input_message(config: dict, args: argparse.Namespace) -> dict:
+  global IMAP_session
+
+  if args.test:
+    try:
+      with open(args.test,'r') as infile:
+        return { 'body': infile.read() }
+    except:
+      fail_miserably(f'Cannot read test file {args.test}')
+
+  try:
+    IMAP_session = open_IMAP(config)
+  except:
+    fail_miserably('Cannot establish connection to IMAP server')
+
+  try:
+    msg = fetch_email(IMAP_session)
+  except:
+    fail_miserably('Cannot fetch email message')
+
   if not 'mail_id' in msg:
-    return
+    print(f'No messages to reply to, no fun today :(')
+    return {}
 
   if not 'body' in msg:
-    delete_message(mail,msg['mail_id'])
+    try:
+      delete_message(IMAP_session,msg['mail_id'])
+    except:
+      fail_miserably(f"Cannot delete message# {msg['mail_id']}")
+    return {}
+
+  return msg
+
+def main() -> None:
+  args = parse_CLI_args()
+  config = read_config(args.config)
+  msg = get_input_message(config,args)
+  if not msg:
+    return
+
+  try:
+    reply = get_ai_response(config,msg['body'])
+  except:
+    fail_miserably('Cannot get a response from OpenAI server')
+
+  if args.test:
+    print(reply)
     return
 
   subject = msg['subject'].split('\n')[0]
-  print(f"From: {msg['from']}\nSubj: {msg['subject']}\n\n{msg['body']}")
+  debug(f"From: {msg['from']}\nSubj: {msg['subject']}\n\n{msg['body']}")
 
-  reply = get_ai_response(config,msg['body'])
   body = f"{reply}\r\n\r\n{'=' * 60}\r\n{msg['body']}"
 
-  print (f"{'=' * 80}\nReplying with...\n\n{body}")
-  sendmail(config,msg['from'],f"Re: {subject}",body)
-  delete_message(mail,msg['id'])
-  mail.logout()
+  debug(f"{'=' * 80}\nReplying with...\n\n{body}")
 
-main()
+  try:
+    sendmail(config,msg['from'],f"Re: {subject}",body)
+  except:
+    fail_miserably(f"Cannot send the reply message to {msg['from']}")
+
+  try:
+    delete_message(IMAP_session,msg['id'])
+    IMAP_session.logout()
+  except:
+    fail_miserably('Cannot delete message that I just replied to')
+
+if __name__ == '__main__':
+  main()
