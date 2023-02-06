@@ -82,15 +82,18 @@ def fetch_email(mail: imaplib.IMAP4) -> dict:
     resp_code, mail_data = mail.fetch(mail_id, '(RFC822)')
     if not isinstance(mail_data,list):
       return { 'id': mail_id }
+
     msg = email.message_from_bytes(mail_data[0][1])
     m_from = msg.get('From')
     m_subj = msg.get('Subject')
     for part in msg.walk():
       if part.get_content_type() == "text/plain":
-        m_text = part.as_string()
-
+        m_text = part.get_payload(decode=True).decode('utf-8')
+        m_text = m_text.encode("ascii","ignore").decode('ascii')
         if len(m_text) > 50:
           return { 'from': m_from, 'subject': m_subj, 'id': mail_id, 'body': m_text }
+
+    return { 'id': mail_id }
 
   return {}
 
@@ -136,10 +139,11 @@ def get_input_message(config: dict, args: argparse.Namespace) -> dict:
   except:
     fail_miserably('Cannot fetch email message')
 
-  if not 'mail_id' in msg:
+  if not 'id' in msg:
     print(f'No messages to reply to, no fun today :(')
     return {}
 
+  debug(str(msg))
   if not 'body' in msg:
     try:
       delete_message(IMAP_session,msg['mail_id'])
