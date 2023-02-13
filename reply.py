@@ -88,7 +88,8 @@ def fetch_email(mail: imaplib.IMAP4) -> dict:
     m_subj = msg.get('Subject')
     for part in msg.walk():
       if part.get_content_type() == "text/plain":
-        m_text = part.get_payload(decode=True).decode('utf-8')
+        m_text = part.get_payload(decode=True)
+        m_text = m_text.decode('utf-8','ignore')
         m_text = m_text.encode("ascii","ignore").decode('ascii')
         if len(m_text) > 50:
           return { 'from': m_from, 'subject': m_subj, 'id': mail_id, 'body': m_text }
@@ -140,7 +141,7 @@ def get_input_message(config: dict, args: argparse.Namespace) -> dict:
     fail_miserably('Cannot fetch email message')
 
   if not 'id' in msg:
-    print(f'No messages to reply to, no fun today :(')
+    print(f'No more messages to reply to, no additional fun today :(')
     return {}
 
   debug(str(msg))
@@ -153,12 +154,10 @@ def get_input_message(config: dict, args: argparse.Namespace) -> dict:
 
   return msg
 
-def main() -> None:
-  args = parse_CLI_args()
-  config = read_config(args.config)
+def process_message(config: dict, args: argparse.Namespace) -> typing.Optional[bool]:
   msg = get_input_message(config,args)
   if not msg:
-    return
+    return None
 
   try:
     reply = get_ai_response(config,msg['body'])
@@ -167,10 +166,12 @@ def main() -> None:
 
   if args.test:
     print(reply)
-    return
+    return None
 
   subject = msg['subject'].split('\n')[0]
-  debug(f"From: {msg['from']}\nSubj: {msg['subject']}\n\n{msg['body']}")
+
+  print(f"Message from: {msg['from']}\nSubject: {msg['subject']}")
+  debug(f"\n{msg['body']}")
 
   body = f"{reply}\r\n\r\n{'=' * 60}\r\n{msg['body']}"
 
@@ -186,6 +187,15 @@ def main() -> None:
     IMAP_session.logout()
   except:
     fail_miserably('Cannot delete message that I just replied to')
+
+  return True
+
+def main() -> None:
+  args = parse_CLI_args()
+  config = read_config(args.config)
+  while True:
+    if not process_message(config,args):
+      return
 
 if __name__ == '__main__':
   main()
