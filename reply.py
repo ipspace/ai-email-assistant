@@ -85,6 +85,7 @@ def fetch_email(mail: imaplib.IMAP4) -> dict:
 
     msg = email.message_from_bytes(mail_data[0][1])
     m_from = msg.get('From')
+    m_reply= msg.get('Reply-To')
     m_subj = msg.get('Subject')
     for part in msg.walk():
       if part.get_content_type() == "text/plain":
@@ -92,7 +93,7 @@ def fetch_email(mail: imaplib.IMAP4) -> dict:
         m_text = m_text.decode('utf-8','ignore')
         m_text = m_text.encode("ascii","ignore").decode('ascii')
         if len(m_text) > 50:
-          return { 'from': m_from, 'subject': m_subj, 'id': mail_id, 'body': m_text }
+          return { 'from': m_reply or m_from, 'subject': m_subj, 'id': mail_id, 'body': m_text }
 
     return { 'id': mail_id }
 
